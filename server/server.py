@@ -19,6 +19,9 @@ SEPARATED_DIR = REPO_DIR / "separated"
 UPLOADS_DIR   = REPO_DIR / "uploads"
 PORT          = 8080
 
+# Adiciona o repo ao path para importar o modulo karaoke
+sys.path.insert(0, str(REPO_DIR))
+
 MODELS = {
     "htdemucs_ft": {
         "label":  "Vocal Remover",
@@ -84,6 +87,8 @@ h2 { font-size:1.05rem; color:#aaa; margin-bottom:.8rem; text-transform:uppercas
 .upload-item {
   background:#111; border:1px solid #2a2a2a; border-radius:8px;
   padding:.9rem 1.1rem; margin-bottom:.6rem;
+}
+.upload-item-row {
   display:flex; align-items:center; gap:1rem; flex-wrap:wrap;
 }
 .upload-item-name { flex:1; font-weight:600; font-size:.95rem; min-width:0; word-break:break-all; }
@@ -95,10 +100,31 @@ h2 { font-size:1.05rem; color:#aaa; margin-bottom:.8rem; text-transform:uppercas
   transition:opacity .15s;
 }
 .mode-btn:hover { opacity:.8; }
-.mode-btn.vocals { background:#3d1f4e; color:#c88edb; }
-.mode-btn.guitar { background:#4a3a1e; color:#f0c87c; }
-.mode-btn.both   { background:#1e3a5f; color:#7cb8f0; }
+.mode-btn.vocals   { background:#3d1f4e; color:#c88edb; }
+.mode-btn.guitar   { background:#4a3a1e; color:#f0c87c; }
+.mode-btn.both     { background:#1e3a5f; color:#7cb8f0; }
+.mode-btn.karaoke  { background:#3a1e2e; color:#f07cb8; }
 .mode-btn:disabled { opacity:.3; cursor:not-allowed; }
+
+/* karaoke panel */
+.karaoke-panel {
+  margin-top:.8rem; padding:.9rem; background:#0f0f0f;
+  border-radius:8px; border:1px solid #2a2a2a;
+}
+.karaoke-panel textarea {
+  width:100%; background:#111; border:1px solid #333; border-radius:6px;
+  color:#e0e0e0; font-size:.83rem; padding:.6rem; resize:vertical;
+  font-family:inherit; margin-bottom:.6rem;
+}
+.karaoke-panel textarea:focus { outline:none; border-color:#555; }
+.karaoke-panel-hint { font-size:.78rem; color:#555; margin-bottom:.6rem; }
+.karaoke-submit {
+  padding:.45rem 1rem; background:#3a1e2e; color:#f07cb8;
+  border:none; border-radius:6px; font-size:.85rem; font-weight:600;
+  cursor:pointer; transition:opacity .15s;
+}
+.karaoke-submit:hover { opacity:.8; }
+.karaoke-submit:disabled { opacity:.3; cursor:not-allowed; }
 
 /* jobs */
 .job {
@@ -140,6 +166,7 @@ h2 { font-size:1.05rem; color:#aaa; margin-bottom:.8rem; text-transform:uppercas
 .stem-btn.vocals       { background:#3d1f4e; color:#c88edb; }
 .stem-btn.no-guitar    { background:#1e4a3a; color:#7cf0b8; }
 .stem-btn.guitar       { background:#4a3a1e; color:#f0c87c; }
+.stem-btn.karaoke      { background:#3a1e2e; color:#f07cb8; }
 .empty { text-align:center; color:#555; padding:1.5rem 0; font-size:.9rem; }
 </style>
 </head>
@@ -225,14 +252,29 @@ async function refreshUploads() {
 
   el.innerHTML = files.map(f => `
     <div class="upload-item">
-      <span class="upload-item-name">&#127925; ${f.name}</span>
-      <span class="upload-item-size">${f.size}</span>
-      <div class="mode-btns">
-        <button class="mode-btn vocals" onclick="process('${f.name}','vocals',this)">&#127908; Vocais</button>
-        <button class="mode-btn guitar" onclick="process('${f.name}','guitar',this)">&#127928; Guitarra</button>
-        <button class="mode-btn both"   onclick="process('${f.name}','both',this)">&#10024; Ambos</button>
+      <div class="upload-item-row">
+        <span class="upload-item-name">&#127925; ${f.name}</span>
+        <span class="upload-item-size">${f.size}</span>
+        <div class="mode-btns">
+          <button class="mode-btn vocals" onclick="process('${f.name}','vocals',this)">&#127908; Vocais</button>
+          <button class="mode-btn guitar" onclick="process('${f.name}','guitar',this)">&#127928; Guitarra</button>
+          <button class="mode-btn both"   onclick="process('${f.name}','both',this)">&#10024; Ambos</button>
+          <button class="mode-btn karaoke" onclick="toggleKaraoke('${f.name}', this)">&#127911; Karaoke</button>
+        </div>
+      </div>
+      <div class="karaoke-panel" id="kp-${f.name}" style="display:none">
+        <p class="karaoke-panel-hint">Cole a letra original abaixo (opcional). Se fornecida, ela sera usada no video — a transcricao automatica serve apenas para alinhar os timestamps.</p>
+        <textarea rows="8" placeholder="Cole a letra aqui..." id="lyrics-${f.name}"></textarea>
+        <button class="karaoke-submit" onclick="startKaraoke('${f.name}', this)">&#9654; Gerar Karaoke</button>
       </div>
     </div>`).join('');
+}
+
+function toggleKaraoke(filename, btn) {
+  const panel = document.getElementById('kp-' + filename);
+  const visible = panel.style.display !== 'none';
+  panel.style.display = visible ? 'none' : '';
+  btn.style.opacity = visible ? '' : '1';
 }
 
 async function process(filename, mode, btn) {
@@ -245,6 +287,25 @@ async function process(filename, mode, btn) {
   const data = await res.json();
   btn.disabled = false;
   if (data.job_ids) data.job_ids.forEach(id => pollJob(id));
+}
+
+async function startKaraoke(filename, btn) {
+  const lyrics = document.getElementById('lyrics-' + filename).value;
+  btn.disabled = true;
+  btn.textContent = 'Iniciando...';
+  const res  = await fetch('/karaoke', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename, lyrics }),
+  });
+  const data = await res.json();
+  btn.disabled = false;
+  btn.textContent = '▶ Gerar Karaoke';
+  if (data.error) {
+    alert('Erro: ' + data.error);
+  } else if (data.job_id) {
+    pollJob(data.job_id);
+  }
 }
 
 // ── job polling ──
@@ -296,7 +357,6 @@ async function refreshSongs() {
     </div>`).join('');
 }
 
-// load uploads on page ready
 refreshUploads();
 </script>
 </body>
@@ -322,11 +382,11 @@ def format_size(n: int) -> str:
 def get_uploads() -> list[dict]:
     if not UPLOADS_DIR.is_dir():
         return []
-    files = []
-    for f in sorted(UPLOADS_DIR.iterdir()):
-        if f.is_file() and f.suffix.lower() in AUDIO_EXTS:
-            files.append({"name": f.name, "size": format_size(f.stat().st_size)})
-    return files
+    return [
+        {"name": f.name, "size": format_size(f.stat().st_size)}
+        for f in sorted(UPLOADS_DIR.iterdir())
+        if f.is_file() and f.suffix.lower() in AUDIO_EXTS
+    ]
 
 
 def get_songs() -> list[dict]:
@@ -351,6 +411,16 @@ def get_songs() -> list[dict]:
                         "path":      f"{model_name}/{song_dir.name}/{fname}",
                         "css_class": css_class,
                     })
+            # Karaoke video (se existir)
+            karaoke_mp4 = song_dir / "karaoke.mp4"
+            if karaoke_mp4.is_file():
+                stems.append({
+                    "file":      "karaoke.mp4",
+                    "label":     "Karaoke",
+                    "size":      format_size(karaoke_mp4.stat().st_size),
+                    "path":      f"{model_name}/{song_dir.name}/karaoke.mp4",
+                    "css_class": "karaoke",
+                })
             if stems:
                 songs.append({"name": song_dir.name, "model": model_info["label"], "stems": stems})
     return songs
@@ -377,6 +447,13 @@ def render_songs_html(songs: list[dict]) -> str:
     return "\n".join(parts)
 
 
+# ── jobs ──────────────────────────────────────────────────────────────────────
+
+def _set_job(job_id: str, **kwargs):
+    with JOBS_LOCK:
+        JOBS[job_id].update(kwargs)
+
+
 def start_job(job_id: str, script: Path, audio_path: Path, model_label: str, song_name: str):
     with JOBS_LOCK:
         JOBS[job_id] = {"status": "running", "model": model_label, "song": song_name, "log": ""}
@@ -393,16 +470,57 @@ def start_job(job_id: str, script: Path, audio_path: Path, model_label: str, son
             log_lines: list[str] = []
             for line in proc.stdout:
                 log_lines.append(line)
-                with JOBS_LOCK:
-                    JOBS[job_id]["log"] = "".join(log_lines[-40:])
+                _set_job(job_id, log="".join(log_lines[-40:]))
             proc.wait()
             status = "done" if proc.returncode == 0 else "error"
         except Exception as exc:
-            with JOBS_LOCK:
-                JOBS[job_id]["log"] += f"\n{exc}"
+            _set_job(job_id, log=str(exc))
         finally:
-            with JOBS_LOCK:
-                JOBS[job_id]["status"] = status
+            _set_job(job_id, status=status)
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+def start_karaoke_job(job_id: str, song_name: str, lyrics: str):
+    with JOBS_LOCK:
+        JOBS[job_id] = {"status": "running", "model": "Karaoke", "song": song_name, "log": "Iniciando..."}
+
+    def run():
+        status = "error"
+        try:
+            import karaoke
+
+            song_dir       = SEPARATED_DIR / "htdemucs_ft" / song_name
+            vocals_path    = song_dir / "vocals.mp3"
+            no_vocals_path = song_dir / "no_vocals.mp3"
+            output_path    = song_dir / "karaoke.mp4"
+
+            if not vocals_path.is_file():
+                raise FileNotFoundError(f"vocals.mp3 nao encontrado em {song_dir}. Processe o audio com 'Vocais' primeiro.")
+            if not no_vocals_path.is_file():
+                raise FileNotFoundError(f"no_vocals.mp3 nao encontrado em {song_dir}. Processe o audio com 'Vocais' primeiro.")
+
+            _set_job(job_id, log="Transcrevendo audio com Whisper...")
+            segments = karaoke.transcribe(vocals_path)
+
+            if lyrics and lyrics.strip():
+                _set_job(job_id, log=f"Transcricao: {len(segments)} segmentos. Alinhando com letra fornecida...")
+                segments = karaoke.align(segments, lyrics)
+            else:
+                _set_job(job_id, log=f"Transcricao: {len(segments)} segmentos. Gerando SRT...")
+
+            srt_path = output_path.with_suffix(".srt")
+            karaoke.write_srt(segments, srt_path)
+            _set_job(job_id, log=f"SRT gerado ({len(segments)} linhas). Renderizando video...")
+
+            karaoke.burn(no_vocals_path, srt_path, output_path)
+            status = "done"
+            _set_job(job_id, log="Video karaoke gerado com sucesso!")
+
+        except Exception as exc:
+            _set_job(job_id, log=str(exc))
+        finally:
+            _set_job(job_id, status=status)
 
     threading.Thread(target=run, daemon=True).start()
 
@@ -452,14 +570,16 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/upload":
             self._handle_upload()
             return
-
         if path == "/process":
             self._handle_process()
+            return
+        if path == "/karaoke":
+            self._handle_karaoke()
             return
 
         self.send_error(404)
 
-    # ── /upload — save file only ──────────────────────────────────────────────
+    # ── /upload ───────────────────────────────────────────────────────────────
 
     def _handle_upload(self):
         content_type = self.headers.get("Content-Type", "")
@@ -496,7 +616,7 @@ class Handler(SimpleHTTPRequestHandler):
         body = json.dumps({"ok": True, "name": safe_name}).encode()
         self._respond(200, "application/json; charset=utf-8", body)
 
-    # ── /process — start job for an already-uploaded file ────────────────────
+    # ── /process ──────────────────────────────────────────────────────────────
 
     def _handle_process(self):
         length = int(self.headers.get("Content-Length", 0))
@@ -545,6 +665,33 @@ class Handler(SimpleHTTPRequestHandler):
         body = json.dumps({"ok": True, "job_ids": job_ids}).encode()
         self._respond(200, "application/json; charset=utf-8", body)
 
+    # ── /karaoke ──────────────────────────────────────────────────────────────
+
+    def _handle_karaoke(self):
+        length = int(self.headers.get("Content-Length", 0))
+        try:
+            payload = json.loads(self.rfile.read(length))
+        except Exception:
+            self._json_error(400, "JSON invalido.")
+            return
+
+        filename = payload.get("filename", "").strip()
+        lyrics   = payload.get("lyrics", "")
+
+        if not filename:
+            self._json_error(400, "filename obrigatorio.")
+            return
+
+        safe_name = "".join(c if c.isalnum() or c in "-_." else "_" for c in Path(filename).name)
+        song_name = Path(safe_name).stem
+
+        ts     = str(int(time.time()))
+        job_id = f"{ts}_karaoke_{song_name}"
+        start_karaoke_job(job_id, song_name, lyrics)
+
+        body = json.dumps({"ok": True, "job_id": job_id}).encode()
+        self._respond(200, "application/json; charset=utf-8", body)
+
     # ── file download ─────────────────────────────────────────────────────────
 
     def _serve_file(self, rel: str):
@@ -556,8 +703,10 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_error(404)
             return
         size = file_path.stat().st_size
+        ext  = file_path.suffix.lower()
+        content_type = "video/mp4" if ext == ".mp4" else "audio/mpeg"
         self.send_response(200)
-        self.send_header("Content-Type", "audio/mpeg")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(size))
         self.send_header("Content-Disposition", f'attachment; filename="{file_path.name}"')
         self.end_headers()
