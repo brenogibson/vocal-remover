@@ -27,7 +27,7 @@ echo "Removendo vocais de: $INPUT"
 echo "Modelo: htdemucs_ft (fine-tuned, melhor qualidade)"
 echo "Isso pode levar alguns minutos..."
 
-python3.13 -m demucs \
+"$(dirname "$0")/.venv/bin/python3" -m demucs \
     --name htdemucs_ft \
     --two-stems vocals \
     --mp3 \

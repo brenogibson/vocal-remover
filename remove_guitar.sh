@@ -27,7 +27,7 @@ echo "Removendo guitarra de: $INPUT"
 echo "Modelo: htdemucs_6s (6 stems: drums, bass, other, vocals, guitar, piano)"
 echo "Isso pode levar alguns minutos..."
 
-python3.13 -m demucs \
+"$(dirname "$0")/.venv/bin/python3" -m demucs \
     --name htdemucs_6s \
     --two-stems guitar \
     --mp3 \
