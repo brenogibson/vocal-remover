@@ -509,11 +509,11 @@ def start_karaoke_job(job_id: str, song_name: str, lyrics: str):
             else:
                 _set_job(job_id, log=f"Transcricao: {len(segments)} segmentos. Gerando SRT...")
 
-            srt_path = output_path.with_suffix(".srt")
-            karaoke.write_srt(segments, srt_path)
-            _set_job(job_id, log=f"SRT gerado ({len(segments)} linhas). Renderizando video...")
+            ass_path = output_path.with_suffix(".ass")
+            karaoke.write_ass(segments, ass_path)
+            _set_job(job_id, log=f"Legenda gerada ({len(segments)} linhas). Renderizando video...")
 
-            karaoke.burn(no_vocals_path, srt_path, output_path)
+            karaoke.burn(no_vocals_path, ass_path, output_path)
             status = "done"
             _set_job(job_id, log="Video karaoke gerado com sucesso!")
 
