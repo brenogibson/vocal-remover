@@ -1,0 +1,21 @@
+# Audio files
+*.mp3
+*.wav
+*.flac
+*.ogg
+*.m4a
+
+# Separated output
+separated/
+
+# Server logs
+server/*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Demucs models cache
+pretrained/
