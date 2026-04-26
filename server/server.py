@@ -379,6 +379,27 @@ def format_size(n: int) -> str:
     return f"{n:.1f} TB"
 
 
+# Nome do arquivo interno -> sufixo usado no download
+_STEM_SUFFIX = {
+    "vocals.mp3":    "vocals",
+    "no_vocals.mp3": "instrumental",
+    "guitar.mp3":    "guitar",
+    "no_guitar.mp3": "no_guitar",
+    "karaoke.mp4":   "karaoke",
+}
+
+
+def _download_name(file_path: Path) -> str:
+    """Gera nome de download no formato {musica}-{tipo}.{ext}.
+
+    file_path e algo como separated/htdemucs_ft/On_My_Way_To_Heaven/vocals.mp3
+    Retorna 'On_My_Way_To_Heaven-vocals.mp3'.
+    """
+    song_name = file_path.parent.name
+    suffix    = _STEM_SUFFIX.get(file_path.name, file_path.stem)
+    return f"{song_name}-{suffix}{file_path.suffix}"
+
+
 def get_uploads() -> list[dict]:
     if not UPLOADS_DIR.is_dir():
         return []
@@ -705,10 +726,11 @@ class Handler(SimpleHTTPRequestHandler):
         size = file_path.stat().st_size
         ext  = file_path.suffix.lower()
         content_type = "video/mp4" if ext == ".mp4" else "audio/mpeg"
+        download_name = _download_name(file_path)
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(size))
-        self.send_header("Content-Disposition", f'attachment; filename="{file_path.name}"')
+        self.send_header("Content-Disposition", f'attachment; filename="{download_name}"')
         self.end_headers()
         with open(file_path, "rb") as f:
             while chunk := f.read(65536):
