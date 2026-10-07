@@ -41,6 +41,13 @@ MODELS = {
     },
 }
 
+# Diretorio onde ficam os audios com o tom alterado (dentro de separated/).
+PITCH_DIR_NAME = "pitch"
+
+# Faixa de transposicao aceita (deve bater com pitch/change_pitch.py).
+PITCH_MIN_SEMITONES = -24
+PITCH_MAX_SEMITONES = 24
+
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
 
@@ -104,7 +111,28 @@ h2 { font-size:1.05rem; color:#aaa; margin-bottom:.8rem; text-transform:uppercas
 .mode-btn.guitar   { background:#4a3a1e; color:#f0c87c; }
 .mode-btn.both     { background:#1e3a5f; color:#7cb8f0; }
 .mode-btn.karaoke  { background:#3a1e2e; color:#f07cb8; }
+.mode-btn.pitch    { background:#1e4a3a; color:#7cf0b8; }
 .mode-btn:disabled { opacity:.3; cursor:not-allowed; }
+
+/* pitch panel */
+.pitch-panel {
+  margin-top:.8rem; padding:.9rem; background:#0f0f0f;
+  border-radius:8px; border:1px solid #2a2a2a;
+  display:flex; align-items:center; gap:.6rem; flex-wrap:wrap;
+}
+.pitch-panel label { font-size:.83rem; color:#aaa; }
+.pitch-panel input[type=number] {
+  width:5rem; background:#111; border:1px solid #333; border-radius:6px;
+  color:#e0e0e0; font-size:.85rem; padding:.4rem .5rem; font-family:inherit;
+}
+.pitch-panel input[type=number]:focus { outline:none; border-color:#555; }
+.pitch-submit {
+  padding:.45rem 1rem; background:#1e4a3a; color:#7cf0b8;
+  border:none; border-radius:6px; font-size:.85rem; font-weight:600;
+  cursor:pointer; transition:opacity .15s;
+}
+.pitch-submit:hover { opacity:.8; }
+.pitch-submit:disabled { opacity:.3; cursor:not-allowed; }
 
 /* karaoke panel */
 .karaoke-panel {
@@ -260,7 +288,13 @@ async function refreshUploads() {
           <button class="mode-btn guitar" onclick="process('${f.name}','guitar',this)">&#127928; Guitarra</button>
           <button class="mode-btn both"   onclick="process('${f.name}','both',this)">&#10024; Ambos</button>
           <button class="mode-btn karaoke" onclick="toggleKaraoke('${f.name}', this)">&#127911; Karaoke</button>
+          <button class="mode-btn pitch" onclick="togglePitch('${f.name}', this)">&#127925; Mudar Tom</button>
         </div>
+      </div>
+      <div class="pitch-panel" id="pp-${f.name}" style="display:none">
+        <label for="semitones-${f.name}">Semitons:</label>
+        <input type="number" id="semitones-${f.name}" value="0" min="-24" max="24" step="1">
+        <button class="pitch-submit" onclick="startPitch('${f.name}', this)">&#9654; Mudar Tom</button>
       </div>
       <div class="karaoke-panel" id="kp-${f.name}" style="display:none">
         <p class="karaoke-panel-hint">Cole a letra original abaixo (opcional). Se fornecida, ela sera usada no video — a transcricao automatica serve apenas para alinhar os timestamps.</p>
@@ -275,6 +309,37 @@ function toggleKaraoke(filename, btn) {
   const visible = panel.style.display !== 'none';
   panel.style.display = visible ? 'none' : '';
   btn.style.opacity = visible ? '' : '1';
+}
+
+function togglePitch(filename, btn) {
+  const panel = document.getElementById('pp-' + filename);
+  const visible = panel.style.display !== 'none';
+  panel.style.display = visible ? 'none' : '';
+  btn.style.opacity = visible ? '' : '1';
+}
+
+async function startPitch(filename, btn) {
+  const semitones = parseInt(document.getElementById('semitones-' + filename).value, 10) || 0;
+  btn.disabled = true;
+  btn.textContent = 'Iniciando...';
+  try {
+    const res  = await fetch('/pitch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename, semitones }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      alert('Erro: ' + data.error);
+    } else if (data.job_id) {
+      pollJob(data.job_id);
+    }
+  } catch (err) {
+    alert('Erro ao mudar o tom: ' + err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '▶ Mudar Tom';
+  }
 }
 
 async function process(filename, mode, btn) {
@@ -395,6 +460,10 @@ def _download_name(file_path: Path) -> str:
     file_path e algo como separated/htdemucs_ft/On_My_Way_To_Heaven/vocals.mp3
     Retorna 'On_My_Way_To_Heaven-vocals.mp3'.
     """
+    # Audios com o tom alterado ficam direto em separated/pitch/ e ja tem
+    # um nome descritivo; usa o proprio nome do arquivo no download.
+    if file_path.parent.name == PITCH_DIR_NAME:
+        return file_path.name
     song_name = file_path.parent.name
     suffix    = _STEM_SUFFIX.get(file_path.name, file_path.stem)
     return f"{song_name}-{suffix}{file_path.suffix}"
@@ -444,6 +513,24 @@ def get_songs() -> list[dict]:
                 })
             if stems:
                 songs.append({"name": song_dir.name, "model": model_info["label"], "stems": stems})
+
+    # Audios com o tom alterado (separated/pitch/*.mp3|*.wav)
+    pitch_dir = SEPARATED_DIR / PITCH_DIR_NAME
+    if pitch_dir.is_dir():
+        for fpath in sorted(pitch_dir.iterdir()):
+            if fpath.is_file() and fpath.suffix.lower() in AUDIO_EXTS:
+                songs.append({
+                    "name":  fpath.stem,
+                    "model": "Mudar Tom",
+                    "stems": [{
+                        "file":      fpath.name,
+                        "label":     "Tom alterado",
+                        "size":      format_size(fpath.stat().st_size),
+                        "path":      f"{PITCH_DIR_NAME}/{fpath.name}",
+                        "css_class": "no-guitar",
+                    }],
+                })
+
     return songs
 
 
@@ -546,6 +633,40 @@ def start_karaoke_job(job_id: str, song_name: str, lyrics: str):
     threading.Thread(target=run, daemon=True).start()
 
 
+def start_pitch_job(job_id: str, filename: str, semitones: int):
+    song_name = Path(filename).stem
+    with JOBS_LOCK:
+        JOBS[job_id] = {"status": "running", "model": "Mudar Tom", "song": song_name, "log": "Iniciando..."}
+
+    def run():
+        status = "error"
+        try:
+            from pitch import change_pitch
+
+            src = UPLOADS_DIR / filename
+            if not src.is_file():
+                raise FileNotFoundError(f"Arquivo nao encontrado: {src}")
+
+            out_dir = SEPARATED_DIR / PITCH_DIR_NAME
+            out_dir.mkdir(parents=True, exist_ok=True)
+            output_path = out_dir / f"{song_name}_pitch{semitones}.mp3"
+
+            _set_job(job_id, log=f"Mudando o tom de {filename}...")
+            _set_job(job_id, log=f"Transpondo {semitones} semitons...")
+
+            change_pitch(src, output_path, semitones)
+
+            status = "done"
+            _set_job(job_id, log=f"Concluido! Arquivo gerado: {output_path.name}")
+
+        except Exception as exc:
+            _set_job(job_id, log=str(exc))
+        finally:
+            _set_job(job_id, status=status)
+
+    threading.Thread(target=run, daemon=True).start()
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # HTTP handler
 # ──────────────────────────────────────────────────────────────────────────────
@@ -596,6 +717,9 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if path == "/karaoke":
             self._handle_karaoke()
+            return
+        if path == "/pitch":
+            self._handle_pitch()
             return
 
         self.send_error(404)
@@ -709,6 +833,50 @@ class Handler(SimpleHTTPRequestHandler):
         ts     = str(int(time.time()))
         job_id = f"{ts}_karaoke_{song_name}"
         start_karaoke_job(job_id, song_name, lyrics)
+
+        body = json.dumps({"ok": True, "job_id": job_id}).encode()
+        self._respond(200, "application/json; charset=utf-8", body)
+
+    # ── /pitch ────────────────────────────────────────────────────────────────
+
+    def _handle_pitch(self):
+        length = int(self.headers.get("Content-Length", 0))
+        try:
+            payload = json.loads(self.rfile.read(length))
+        except Exception:
+            self._json_error(400, "JSON invalido.")
+            return
+
+        filename = payload.get("filename", "").strip()
+        semitones = payload.get("semitones", 0)
+
+        if not filename:
+            self._json_error(400, "filename obrigatorio.")
+            return
+
+        try:
+            semitones = int(semitones)
+        except (TypeError, ValueError):
+            self._json_error(400, "Numero de semitons invalido.")
+            return
+
+        if not (PITCH_MIN_SEMITONES <= semitones <= PITCH_MAX_SEMITONES):
+            self._json_error(
+                400,
+                f"Semitons fora da faixa permitida "
+                f"({PITCH_MIN_SEMITONES}..{PITCH_MAX_SEMITONES}).",
+            )
+            return
+
+        safe_name = "".join(c if c.isalnum() or c in "-_." else "_" for c in Path(filename).name)
+        src = UPLOADS_DIR / safe_name
+        if not src.is_file():
+            self._json_error(404, "Arquivo nao encontrado.")
+            return
+
+        ts     = str(int(time.time()))
+        job_id = f"{ts}_pitch_{Path(safe_name).stem}"
+        start_pitch_job(job_id, safe_name, semitones)
 
         body = json.dumps({"ok": True, "job_id": job_id}).encode()
         self._respond(200, "application/json; charset=utf-8", body)
