@@ -44,6 +44,10 @@ MODELS = {
 # Diretorio onde ficam os audios com o tom alterado (dentro de separated/).
 PITCH_DIR_NAME = "pitch"
 
+# Faixa de transposicao aceita (deve bater com pitch/change_pitch.py).
+PITCH_MIN_SEMITONES = -24
+PITCH_MAX_SEMITONES = 24
+
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
 
@@ -289,7 +293,7 @@ async function refreshUploads() {
       </div>
       <div class="pitch-panel" id="pp-${f.name}" style="display:none">
         <label for="semitones-${f.name}">Semitons:</label>
-        <input type="number" id="semitones-${f.name}" value="0" min="-12" max="12" step="1">
+        <input type="number" id="semitones-${f.name}" value="0" min="-24" max="24" step="1">
         <button class="pitch-submit" onclick="startPitch('${f.name}', this)">&#9654; Mudar Tom</button>
       </div>
       <div class="karaoke-panel" id="kp-${f.name}" style="display:none">
@@ -318,18 +322,23 @@ async function startPitch(filename, btn) {
   const semitones = parseInt(document.getElementById('semitones-' + filename).value, 10) || 0;
   btn.disabled = true;
   btn.textContent = 'Iniciando...';
-  const res  = await fetch('/pitch', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ filename, semitones }),
-  });
-  const data = await res.json();
-  btn.disabled = false;
-  btn.textContent = '▶ Mudar Tom';
-  if (data.error) {
-    alert('Erro: ' + data.error);
-  } else if (data.job_id) {
-    pollJob(data.job_id);
+  try {
+    const res  = await fetch('/pitch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename, semitones }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      alert('Erro: ' + data.error);
+    } else if (data.job_id) {
+      pollJob(data.job_id);
+    }
+  } catch (err) {
+    alert('Erro ao mudar o tom: ' + err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '▶ Mudar Tom';
   }
 }
 
@@ -849,6 +858,14 @@ class Handler(SimpleHTTPRequestHandler):
             semitones = int(semitones)
         except (TypeError, ValueError):
             self._json_error(400, "Numero de semitons invalido.")
+            return
+
+        if not (PITCH_MIN_SEMITONES <= semitones <= PITCH_MAX_SEMITONES):
+            self._json_error(
+                400,
+                f"Semitons fora da faixa permitida "
+                f"({PITCH_MIN_SEMITONES}..{PITCH_MAX_SEMITONES}).",
+            )
             return
 
         safe_name = "".join(c if c.isalnum() or c in "-_." else "_" for c in Path(filename).name)
